@@ -9,11 +9,15 @@
 #define MAP_QUAL_CUT (30)
 #define MIN_ALLELE_BOTH_STRANDS (1) // The minimum number of times we 
 // must see an alternate allele on BOTH STRANDS to report a variant position
+// This is the default value. Can be changed by an option
 
-int variant( PulP pp, char* allele1, char* allele2, const int het_only );
+int variant( PulP pp, char* allele1, char* allele2,
+	     const int het_only, const int mabs );
 
 void help( void ) {
   printf( "pu-variants -p <pileup fn> -l <low cov> -h <high cov> -d \n" );
+  printf( "            -m [required observations of each allele on each\n" );
+  printf( "                strands; default = %d]\n", MIN_ALLELE_BOTH_STRANDS );
   printf( "            -H [if set, show het sites only]\n" );
   printf( "Prints a bed file of positions with likely variants.\n" );
   printf( "These variants are either homozygous differences from\n" );
@@ -35,6 +39,7 @@ int main( int argc, char* argv[] ) {
   int pu_file_input = 0;
   int low_cov = 6;
   int high_cov = 20;
+  int mabs = MIN_ALLELE_BOTH_STRANDS; // set default
   int debug = 0;
   int het_only = 0;
   int invalid_pul;
@@ -48,7 +53,7 @@ int main( int argc, char* argv[] ) {
   qcp = dummyQcutsP();
 
     /* Get options */
-  while( (ich=getopt( argc, argv, "p:l:h:dH" )) != -1 ) {
+  while( (ich=getopt( argc, argv, "p:l:h:m:dH" )) != -1 ) {
     switch(ich) {
     case 'p' :
       strcpy( pu_fn, optarg );
@@ -59,6 +64,9 @@ int main( int argc, char* argv[] ) {
       break;
     case 'h' :
       high_cov = atoi( optarg );
+      break;
+    case 'm' :
+      mabs = atoi( optarg );
       break;
     case 'd' :
       debug = 1;
@@ -95,7 +103,7 @@ int main( int argc, char* argv[] ) {
     if ( !invalid_pul ) {
       if ( (pp->cov <= high_cov) &&
 	   (pp->cov >= low_cov) ) {
-	if ( variant( pp, &allele1, &allele2, het_only ) ) {
+	if ( variant( pp, &allele1, &allele2, het_only, mabs ) ) {
 	  printf( "%s %d %d %c %c\n", 
 		  pp->chr, (int)pp->pos, (int)pp->pos,
 		  allele1, allele2 );
@@ -128,7 +136,8 @@ int main( int argc, char* argv[] ) {
    with the two alleles. allele1 is always the reference
    if that is one of the two alleles
 */
-int variant( PulP pp, char* allele1, char* allele2, const int het_only ) {
+int variant( PulP pp, char* allele1, char* allele2,
+	     const int het_only, const int mabs ) {
   int fA = 0;
   int fC = 0;
   int fG = 0;
@@ -179,23 +188,23 @@ int variant( PulP pp, char* allele1, char* allele2, const int het_only ) {
   }
 
   /* Populate the conf_alleles[] and num_conf_alleles */
-  if ( (fA >= MIN_ALLELE_BOTH_STRANDS) && 
-       (rA >= MIN_ALLELE_BOTH_STRANDS) ) {
+  if ( (fA >= mabs) && 
+       (rA >= mabs) ) {
       conf_alleles[num_conf_alleles] = 'A';
       num_conf_alleles++;
     }
-    if ( (fC >= MIN_ALLELE_BOTH_STRANDS) && 
-	 (rC >= MIN_ALLELE_BOTH_STRANDS) ) {
+    if ( (fC >= mabs) && 
+	 (rC >= mabs) ) {
       conf_alleles[num_conf_alleles] = 'C';
       num_conf_alleles++;
     }
-    if ( (fG >= MIN_ALLELE_BOTH_STRANDS) && 
-	 (rG >= MIN_ALLELE_BOTH_STRANDS) ) {
+    if ( (fG >= mabs) && 
+	 (rG >= mabs) ) {
       conf_alleles[num_conf_alleles] = 'G';
       num_conf_alleles++;
     }
-    if ( (fT >= MIN_ALLELE_BOTH_STRANDS) && 
-	 (rT >= MIN_ALLELE_BOTH_STRANDS) ) {
+    if ( (fT >= mabs) && 
+	 (rT >= mabs) ) {
       conf_alleles[num_conf_alleles] = 'T';
       num_conf_alleles++;
     }
