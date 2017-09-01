@@ -3,8 +3,10 @@
 #include <ctype.h>
 #include <string.h>
 #include <limits.h>
+#include <math.h>
 #include "pileup.h"
 #include "getopt.h"
+
 #define MAX_FN_LEN (512)
 #define MAP_QUAL_CUT (30)
 #define MIN_ALLELE_BOTH_STRANDS (1) // The minimum number of times we 
@@ -12,12 +14,14 @@
 // This is the default value. Can be changed by an option
 
 int variant( PulP pp, char* allele1, char* allele2,
-	     const int het_only, const int mabs );
+	     const int het_only, const int mabs, const double max_af );
 
 void help( void ) {
   printf( "pu-variants -p <pileup fn> -l <low cov> -h <high cov> -d \n" );
   printf( "            -m [required observations of each allele on each\n" );
   printf( "                strands; default = %d]\n", MIN_ALLELE_BOTH_STRANDS );
+  printf( "            -P [ maximum fraction of highest allele count; default = %f]\n",
+	  0.75 );
   printf( "            -H [if set, show het sites only]\n" );
   printf( "Prints a bed file of positions with likely variants.\n" );
   printf( "These variants are either homozygous differences from\n" );
@@ -40,6 +44,7 @@ int main( int argc, char* argv[] ) {
   int low_cov = 6;
   int high_cov = 20;
   int mabs = MIN_ALLELE_BOTH_STRANDS; // set default
+  double max_af = 0.75;
   int debug = 0;
   int het_only = 0;
   int invalid_pul;
@@ -53,7 +58,7 @@ int main( int argc, char* argv[] ) {
   qcp = dummyQcutsP();
 
     /* Get options */
-  while( (ich=getopt( argc, argv, "p:l:h:m:dH" )) != -1 ) {
+  while( (ich=getopt( argc, argv, "p:l:h:m:P:dH" )) != -1 ) {
     switch(ich) {
     case 'p' :
       strcpy( pu_fn, optarg );
@@ -67,6 +72,9 @@ int main( int argc, char* argv[] ) {
       break;
     case 'm' :
       mabs = atoi( optarg );
+      break;
+    case 'P' :
+      max_af = atof( optarg );
       break;
     case 'd' :
       debug = 1;
@@ -103,7 +111,7 @@ int main( int argc, char* argv[] ) {
     if ( !invalid_pul ) {
       if ( (pp->cov <= high_cov) &&
 	   (pp->cov >= low_cov) ) {
-	if ( variant( pp, &allele1, &allele2, het_only, mabs ) ) {
+	if ( variant( pp, &allele1, &allele2, het_only, mabs, max_af ) ) {
 	  printf( "%s %d %d %c %c\n", 
 		  pp->chr, (int)pp->pos, (int)pp->pos,
 		  allele1, allele2 );
@@ -119,7 +127,7 @@ int main( int argc, char* argv[] ) {
       invalid_pul = line2pul( line, pp );
     }
   }
-
+  
 
   /* It's a fire hazard - shut it down! */
   fclose( f );
@@ -137,7 +145,7 @@ int main( int argc, char* argv[] ) {
    if that is one of the two alleles
 */
 int variant( PulP pp, char* allele1, char* allele2,
-	     const int het_only, const int mabs ) {
+	     const int het_only, const int mabs, const double max_af ) {
   int fA = 0;
   int fC = 0;
   int fG = 0;
@@ -149,7 +157,10 @@ int variant( PulP pp, char* allele1, char* allele2,
   int i;
   int num_conf_alleles = 0;
   char conf_alleles[4];
-
+  int trials = 0;
+  int successes = 0;
+  double obs_af;
+  
   for( i = 0; i < pp->cov; i++ ) {
     switch (pp->bases[i]) {
     case 'A' :
@@ -190,29 +201,49 @@ int variant( PulP pp, char* allele1, char* allele2,
   /* Populate the conf_alleles[] and num_conf_alleles */
   if ( (fA >= mabs) && 
        (rA >= mabs) ) {
-      conf_alleles[num_conf_alleles] = 'A';
-      num_conf_alleles++;
+    conf_alleles[num_conf_alleles] = 'A';
+    num_conf_alleles++;
+    trials += (fA + rA);
+    if ( (fA+rA) > successes ) {
+      successes = (fA+rA);
     }
-    if ( (fC >= mabs) && 
-	 (rC >= mabs) ) {
-      conf_alleles[num_conf_alleles] = 'C';
-      num_conf_alleles++;
+  }
+  if ( (fC >= mabs) && 
+       (rC >= mabs) ) {
+    conf_alleles[num_conf_alleles] = 'C';
+    num_conf_alleles++;
+    trials += (fC + rC);
+    if ( (fC+rC) > successes ) {
+      successes = (fC+rC);
     }
-    if ( (fG >= mabs) && 
-	 (rG >= mabs) ) {
-      conf_alleles[num_conf_alleles] = 'G';
-      num_conf_alleles++;
+  }
+  if ( (fG >= mabs) && 
+       (rG >= mabs) ) {
+    conf_alleles[num_conf_alleles] = 'G';
+    num_conf_alleles++;
+    trials += (fG + rG);
+    if ( (fG+rG) > successes ) {
+      successes = (fG+rG);
     }
-    if ( (fT >= mabs) && 
-	 (rT >= mabs) ) {
-      conf_alleles[num_conf_alleles] = 'T';
-      num_conf_alleles++;
+  }
+  if ( (fT >= mabs) && 
+       (rT >= mabs) ) {
+    conf_alleles[num_conf_alleles] = 'T';
+    num_conf_alleles++;
+    trials += (fT + rT);
+    if ( (fT+rT) > successes ) {
+      successes = (fT+rT);
     }
+  }
     
-    /* Bi-allelic in confident alleles? */
-    if ( num_conf_alleles == 2 ) {
-      *allele1 = conf_alleles[0];
-      *allele2 = conf_alleles[1];
+  /* Bi-allelic in confident alleles? */
+  if ( num_conf_alleles == 2 ) {
+    *allele1 = conf_alleles[0];
+    *allele2 = conf_alleles[1];
+    
+    /* Check allele-fraction of this site. Too high? */
+    obs_af = (double)successes / (double)trials;
+    if ( obs_af <= max_af ) {
       if ( conf_alleles[0] == pp->ref ) {
 	// Ready to return
 	return 1;
@@ -225,23 +256,28 @@ int variant( PulP pp, char* allele1, char* allele2,
       /* Neither were the reference, no guaranteed order */
       return 1;
     }
-
-    /* If we only found one confident allele, this is
-       a variant site IFF that wasn't the reference
-       allele & if we're not in het_only mode */
-    if ( het_only ) {
+    else {
+      /* Had two confident alleles, but binomial p-value
+	 was below the minimum */
       return 0;
     }
-    if ( num_conf_alleles == 1 ) {
-      if ( (conf_alleles[0] != pp->ref) &&
-	   (pp->ref != 'N') ) {
-	*allele1 = pp->ref;
-	*allele2 = conf_alleles[0];
-	return 1;
-      }
+  }
+    
+  /* If we only found one confident allele, this is
+     a variant site IFF that wasn't the reference
+     allele & if we're not in het_only mode */
+  if ( het_only ) {
+    return 0;
+  }
+  if ( num_conf_alleles == 1 ) {
+    if ( (conf_alleles[0] != pp->ref) &&
+	 (pp->ref != 'N') ) {
+      *allele1 = pp->ref;
+      *allele2 = conf_alleles[0];
+      return 1;
     }
-
-    return 0; // tri- or quad-allelic or only reference
+  }
+  
+  return 0; // tri- or quad-allelic or only reference
 }
   
-      
